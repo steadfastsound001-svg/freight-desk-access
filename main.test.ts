@@ -66,6 +66,42 @@ Deno.test("foreign or missing Origin and missing client marker never reach upstr
   }
 });
 
+Deno.test("Render TLS termination accepts only the public HTTPS origin and rewrites redirects to HTTPS", async () => {
+  const publicOrigin = "https://freight-desk-johnny.onrender.com";
+  const internalUrl = "http://freight-desk-johnny.onrender.com/api/orders/search";
+  let forwarded = 0;
+  const fetchUpstream: typeof fetch = (_input, init) => {
+    forwarded++;
+    assert(new Headers(init?.headers).get("origin") === UPSTREAM);
+    return Promise.resolve(new Response(null, { status: 302, headers: { location: UPSTREAM + "/orders" } }));
+  };
+  const request = (origin: string, protocol = "https") => new Request(internalUrl, {
+    method: "POST",
+    headers: { origin, "x-forwarded-proto": protocol, "x-freight-desk": "1" },
+  });
+  const accepted = await handleRequest(request(publicOrigin), fetchUpstream);
+  assert(accepted.status === 302);
+  assert(accepted.headers.get("location") === publicOrigin + "/orders");
+  for (const rejected of [
+    request("https://foreign.example"),
+    request("http://freight-desk-johnny.onrender.com"),
+    request(publicOrigin, "https, http"),
+  ]) assert((await handleRequest(rejected, fetchUpstream)).status === 403);
+  assert(forwarded === 1);
+});
+
+Deno.test("direct local HTTP keeps its origin and redirect scheme without forwarded headers", async () => {
+  const localOrigin = "http://localhost:8000";
+  const fetchUpstream: typeof fetch = () => Promise.resolve(new Response(null, {
+    status: 302, headers: { location: UPSTREAM + "/orders" },
+  }));
+  const response = await handleRequest(new Request(localOrigin + "/api/saved", {
+    method: "POST", headers: { origin: localOrigin, "x-freight-desk": "1" },
+  }), fetchUpstream);
+  assert(response.status === 302);
+  assert(response.headers.get("location") === localOrigin + "/orders");
+});
+
 Deno.test("fixed upstream cannot be replaced through the path and redirects remain same-origin", async () => {
   const fetchUpstream: typeof fetch = (input) => {
     assert(new URL(String(input)).origin === UPSTREAM);

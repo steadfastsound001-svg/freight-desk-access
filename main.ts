@@ -22,6 +22,8 @@ function error(message: string, status: number) {
 
 export async function handleRequest(request: Request, fetchUpstream: typeof fetch = fetch): Promise<Response> {
   const incoming = new URL(request.url);
+  // Render terminates TLS before forwarding HTTP to Deno.
+  if (request.headers.get("x-forwarded-proto") === "https") incoming.protocol = "https:";
   const readOnly = request.method === "GET" || request.method === "HEAD";
   if (!readOnly && (request.headers.get("origin") !== incoming.origin || request.headers.get("x-freight-desk") !== "1"))
     return error("Запрос с другого сайта отклонён.", 403);
